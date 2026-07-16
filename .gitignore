@@ -1,0 +1,23 @@
+# ==========================================================================
+#  NEVER commit real orphan data (PII).
+#  The hosted editions read from their LIVE backend (Supabase / Google Sheet) or
+#  the user's own local Excel; the standalone files ship with SYNTHETIC demo data.
+#  Real records must stay OUT of git. (Comments must be on their own line here —
+#  inline "# ..." after a pattern is treated as PART of the pattern by git.)
+# ==========================================================================
+
+# real orphan records (PII):
+**/data/
+**/sample/
+seed.sql
+*.csv
+*.xlsx
+*.db
+dashboard-old.html
+
+# tooling / editor junk:
+__pycache__/
+*.pyc
+.DS_Store
+Thumbs.db
+scratch*/

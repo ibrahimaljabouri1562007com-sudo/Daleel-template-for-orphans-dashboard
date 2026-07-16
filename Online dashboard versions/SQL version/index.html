@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>مركز الدليل — لوحة تحليل حالات الأيتام</title>
+<!-- served edition (SQL version): reads a central Supabase (Postgres) database via its REST API. Assets are external (not an offline single file). -->
+<link rel="stylesheet" href="assets/fonts/fonts.css">
+<script src="vendor/exceljs.min.js"></script>
+<script src="vendor/supabase.js"></script>
+<style>
+
+:root{
+  --surface:#fcfcfb; --plane:#f9f9f7; --card:#ffffff;
+  --ink:#0b0b0b; --ink2:#52514e; --muted:#898781;
+  --grid:#e1e0d9; --axis:#c3c2b7; --border:rgba(11,11,11,.10); --border2:rgba(11,11,11,.06);
+  --s1:#2a78d6; --s2:#1baf7a; --s3:#eda100; --s4:#008300; --s5:#4a3aa7; --s6:#e34948;
+  --b100:#cde2fb; --b200:#9ec5f4; --b300:#6da7ec; --b400:#3987e5; --b500:#256abf; --b600:#184f95; --b700:#0d366b;
+  --good:#0ca30c; --warning:#fab219; --serious:#ec835a; --critical:#d03b3b; --good-ink:#006300;
+  --accent:#184f95; --radius:14px; --radius-s:9px;
+  --shadow:0 1px 2px rgba(16,24,40,.04),0 1px 3px rgba(16,24,40,.06);
+}
+:root[data-theme="dark"]{
+  --surface:#1a1a19; --plane:#0d0d0d; --card:#201f1e; --ink:#fff; --ink2:#c3c2b7; --muted:#898781;
+  --grid:#2c2c2a; --axis:#383835; --border:rgba(255,255,255,.10); --border2:rgba(255,255,255,.06);
+  --s1:#3987e5; --s2:#199e70; --s3:#c98500; --s5:#9085e9; --s6:#e66767;
+  --b100:#0d366b; --b200:#104281; --b300:#184f95; --b400:#256abf; --b500:#3987e5; --b600:#6da7ec; --b700:#9ec5f4;
+  --good-ink:#0ca30c; --accent:#6da7ec; --shadow:0 1px 2px rgba(0,0,0,.3);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{font-family:system-ui,-apple-system,"Segoe UI","Readex Pro",Tahoma,sans-serif;background:var(--plane);color:var(--ink);font-size:14px;line-height:1.55;-webkit-font-smoothing:antialiased}
+.tnum{font-variant-numeric:tabular-nums}
+button{font-family:inherit;cursor:pointer}
+h1,h2,h3{font-weight:650;letter-spacing:-.01em}
+
+/* onboarding */
+#gate{position:fixed;inset:0;z-index:100;display:grid;place-items:center;padding:24px;overflow:auto;
+  background:radial-gradient(1200px 600px at 80% -10%,#eef3f8,transparent 60%),var(--plane)}
+:root[data-theme="dark"] #gate{background:radial-gradient(1200px 600px at 80% -10%,#12233a,transparent 60%),var(--plane)}
+.gate-card{background:var(--card);border:1px solid var(--border);border-radius:20px;max-width:640px;width:100%;padding:32px 30px;box-shadow:0 20px 60px rgba(16,24,40,.12);margin:auto}
+.gate-card h1{font-size:21px;margin-bottom:6px}
+.gate-card .sub{color:var(--ink2);font-size:13.5px;margin-bottom:20px}
+.sect-lab{font-size:12px;color:var(--ink2);font-weight:700;margin:18px 0 8px;display:flex;align-items:center;gap:8px}
+.sect-lab .n{width:18px;height:18px;border-radius:50%;background:var(--accent);color:#fff;font-size:11px;display:grid;place-items:center;font-weight:700}
+.field{margin-bottom:12px}
+.field label{display:block;font-size:12px;color:var(--ink2);font-weight:600;margin-bottom:6px}
+.field input[type=text]{width:100%;border:1px solid var(--border);border-radius:var(--radius-s);padding:10px 12px;font-family:inherit;font-size:14px;background:var(--surface);color:var(--ink)}
+.field input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(37,106,191,.15)}
+.logo-row{display:flex;align-items:center;gap:12px}
+.logo-prev{width:46px;height:46px;border-radius:12px;border:1px dashed var(--border);display:grid;place-items:center;overflow:hidden;background:var(--surface);flex-shrink:0;color:var(--muted);font-size:11px}
+.logo-prev img{width:100%;height:100%;object-fit:contain}
+.btn{border:1px solid var(--border);background:var(--card);color:var(--ink);border-radius:var(--radius-s);padding:10px 15px;font-size:13.5px;font-weight:600;display:inline-flex;align-items:center;justify-content:center;gap:8px;transition:.15s}
+.btn:hover{border-color:var(--axis);background:var(--plane)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn.primary:hover{filter:brightness(1.08)}
+.btn.sm{padding:7px 11px;font-size:12.5px}
+.btn.ghost{background:transparent;border-color:transparent;color:var(--ink2)}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+
+/* package picker */
+.pkg-hint{font-size:11.5px;color:var(--muted);margin-bottom:10px;line-height:1.6}
+.pkgs{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
+.pkg{border:1px solid var(--border);border-radius:11px;padding:10px 12px;cursor:pointer;transition:.12s;background:var(--surface);display:flex;gap:9px;align-items:flex-start}
+.pkg:hover{border-color:var(--axis)}
+.pkg.on{border-color:var(--accent);background:rgba(37,106,191,.06);box-shadow:inset 0 0 0 1px var(--accent)}
+.pkg.core{cursor:default}
+.pkg .chk{width:17px;height:17px;border-radius:5px;border:1.6px solid var(--axis);display:grid;place-items:center;flex-shrink:0;margin-top:1px;font-size:11px;color:transparent}
+.pkg.on .chk{background:var(--accent);border-color:var(--accent);color:#fff}
+.pkg .t{font-size:12.8px;font-weight:650}
+.pkg .d{font-size:10.8px;color:var(--muted);margin-top:2px;line-height:1.45}
+.gate-actions{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:20px}
+.gate-note{font-size:11.5px;color:var(--muted);margin-top:14px;line-height:1.7}
+.err-box{background:rgba(208,59,59,.08);border:1px solid rgba(208,59,59,.3);border-radius:10px;padding:11px 13px;font-size:12px;color:var(--critical);margin-top:12px;line-height:1.7;display:none}
+.report{margin-top:14px;border:1px solid var(--border);border-radius:12px;overflow:hidden;display:none}
+.report .r-h{padding:11px 14px;font-size:13px;font-weight:700;display:flex;align-items:center;gap:8px}
+.report.block .r-h{background:rgba(208,59,59,.1);color:var(--critical)}
+.report.warn .r-h{background:rgba(250,178,25,.14);color:#8a5d00}
+.report.ok .r-h{background:rgba(12,163,12,.1);color:var(--good-ink)}
+.report .r-body{padding:4px 14px 8px;max-height:230px;overflow:auto}
+.r-line{font-size:12px;padding:7px 0;border-bottom:1px solid var(--border2);display:flex;gap:8px;line-height:1.5}
+.r-line:last-child{border-bottom:none}
+.r-line .ic{flex-shrink:0;font-weight:800;font-size:13px}
+.r-line.err .ic{color:var(--critical)} .r-line.warn .ic{color:#b8860b} .r-line.info .ic{color:var(--muted)}
+.r-line b{color:var(--ink);font-weight:700} .r-line .rows{color:var(--muted);font-size:11px}
+.report .r-foot{padding:11px 14px;border-top:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;gap:10px}
+.report .r-foot .msg{font-size:11.5px;color:var(--muted)}
+
+/* app shell */
+#app{display:none;max-width:1440px;margin:0 auto;padding:18px 22px 60px}
+.topbar{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:6px 2px 16px}
+.brand{display:flex;align-items:center;gap:12px}
+.brand .logo{width:42px;height:42px;border-radius:11px;border:1px solid var(--border);overflow:hidden;display:grid;place-items:center;background:var(--card);flex-shrink:0}
+.brand .logo img{width:100%;height:100%;object-fit:contain}
+.brand .name{font-size:16.5px;font-weight:680;line-height:1.2}
+.brand .role{font-size:11.5px;color:var(--muted)}
+.topbar .spacer{margin-inline-start:auto}
+.tools{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.tsep{width:1px;align-self:stretch;min-height:22px;background:var(--border)}
+.sync-state{font-size:11.5px;color:var(--muted);display:flex;align-items:center;gap:6px}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--good)} .dot.off{background:var(--axis)}
+.filters{display:flex;gap:9px;flex-wrap:wrap;align-items:center;padding:12px 14px;background:var(--card);border:1px solid var(--border);border-radius:var(--radius);margin-bottom:16px}
+.filters select,.filters input{border:1px solid var(--border);border-radius:8px;padding:7px 10px;font-family:inherit;font-size:12.5px;background:var(--surface);color:var(--ink);appearance:none}
+.filters .search{flex:1;min-width:180px}
+.filters label{font-size:11px;color:var(--muted);font-weight:600;margin-inline-end:-4px}
+.reset{color:var(--critical);border:1px solid var(--border);background:var(--surface);font-size:12.5px;font-weight:600;padding:7px 13px;border-radius:8px;cursor:pointer;transition:.15s}
+.reset:hover{background:var(--critical);color:#fff;border-color:var(--critical)}
+.reset.showall{color:var(--accent);border-color:var(--border)}
+.reset.showall:hover{background:var(--accent);color:#fff;border-color:var(--accent)}
+/* row actions */
+td.act{white-space:nowrap;text-align:end}
+.iconbtn{border:1px solid var(--border);background:var(--surface);color:var(--ink2);border-radius:7px;padding:3px 9px;font-size:11.5px;font-weight:600;cursor:pointer;margin-inline-start:4px;transition:.15s}
+.iconbtn.edit:hover{background:var(--accent);color:#fff;border-color:var(--accent)}
+.iconbtn.del:hover{background:var(--critical);color:#fff;border-color:var(--critical)}
+/* pagination */
+.pager{display:flex;align-items:center;justify-content:center;gap:12px;padding:12px 6px 2px;flex-wrap:wrap}
+.pager .info{color:var(--muted);font-size:12px;font-variant-numeric:tabular-nums}
+.pager select{border:1px solid var(--border);border-radius:7px;padding:5px 8px;background:var(--surface);color:var(--ink);font-family:inherit;font-size:12px}
+.pager button{border:1px solid var(--border);background:var(--surface);color:var(--ink);border-radius:8px;padding:6px 15px;font-size:12.5px;font-weight:600;cursor:pointer;transition:.15s}
+.pager button:hover:not(:disabled){background:var(--plane)}
+.pager button:disabled{opacity:.4;cursor:default}
+/* auto-save toggle + dirty */
+.switch{display:inline-flex;align-items:center;gap:7px;cursor:pointer;font-size:12px;color:var(--ink2);user-select:none}
+.switch input{position:absolute;opacity:0}
+.switch .track{width:34px;height:19px;border-radius:20px;background:var(--border);position:relative;transition:.15s;flex:none}
+.switch .track::after{content:'';position:absolute;width:15px;height:15px;border-radius:50%;background:#fff;top:2px;inset-inline-start:2px;transition:.15s}
+.switch input:checked+.track{background:var(--good)}
+.switch input:checked+.track::after{inset-inline-start:17px}
+.switch input:disabled+.track{opacity:.4}
+.switch.off{opacity:.5;cursor:not-allowed}
+.dirty-ind{display:none;align-items:center;gap:6px;font-size:11.5px;color:var(--warning);font-weight:600}
+.dirty-ind::before{content:'';width:8px;height:8px;border-radius:50%;background:var(--warning)}
+/* modal */
+.modal-ov{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;align-items:flex-start;justify-content:center;z-index:60;overflow:auto;padding:32px 16px}
+.modal-ov.on{display:flex}
+.modal{background:var(--card);border:1px solid var(--border);border-radius:14px;width:100%;max-width:780px;box-shadow:0 24px 70px rgba(0,0,0,.35)}
+.modal-h{display:flex;align-items:center;justify-content:space-between;padding:15px 20px;border-bottom:1px solid var(--border)}
+.modal-h h3{font-size:15.5px}
+.modal-b{padding:16px 20px;max-height:64vh;overflow:auto}
+.modal-f{display:flex;gap:10px;justify-content:flex-end;align-items:center;padding:13px 20px;border-top:1px solid var(--border)}
+.fsec{margin-bottom:15px}
+.fsec>.t{font-size:11.5px;font-weight:700;color:var(--accent);margin-bottom:9px;padding-bottom:4px;border-bottom:1px dashed var(--border)}
+.fgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:10px}
+.fld{display:flex;flex-direction:column;gap:3px}
+.fld label{font-size:11px;color:var(--muted);font-weight:600}
+.fld input,.fld select{border:1px solid var(--border);border-radius:8px;padding:7px 9px;font-family:inherit;font-size:12.5px;background:var(--surface);color:var(--ink)}
+.fld input:disabled{background:var(--plane);color:var(--muted)}
+.fld.bad input,.fld.bad select{border-color:var(--critical);background:color-mix(in srgb,var(--critical) 6%,var(--surface))}
+.fld .err{font-size:10px;color:var(--critical);min-height:0;display:none}
+.fld.bad .err{display:block}
+.modal-err{color:var(--critical);font-size:12px;font-weight:600;margin-inline-end:auto}
+.fld label .req{color:var(--critical);margin-inline-start:2px}
+.mwarn{display:none;margin:0 20px;padding:12px 14px;border:1px solid var(--warning);background:color-mix(in srgb,var(--warning) 12%,var(--card));border-radius:10px}
+.mwarn b{color:var(--ink)} .mwarn .sub{font-size:11.5px;color:var(--ink2);margin-top:5px;line-height:1.5}
+.mwarn .act{display:flex;gap:8px;justify-content:flex-end;margin-top:10px}
+
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:16px}
+.kpi{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:15px 16px;box-shadow:var(--shadow)}
+.kpi .k-lab{font-size:12px;color:var(--ink2);font-weight:600;margin-bottom:8px}
+.kpi .k-val{font-size:30px;font-weight:700;letter-spacing:-.02em;line-height:1}
+.kpi .k-val small{font-size:15px;color:var(--muted);font-weight:600}
+.kpi .k-sub{font-size:11.5px;color:var(--muted);margin-top:7px;display:flex;align-items:center;gap:6px}
+.k-tag{font-size:11px;font-weight:700;padding:1px 7px;border-radius:20px}
+.k-tag.crit{background:rgba(208,59,59,.12);color:var(--critical)}
+.k-tag.warn{background:rgba(250,178,25,.16);color:#9a6b00}
+:root[data-theme="dark"] .k-tag.warn{color:#fab219}
+.k-tag.good{background:rgba(12,163,12,.12);color:var(--good-ink)}
+.mini-bar{height:6px;border-radius:4px;background:var(--grid);overflow:hidden;margin-top:9px;display:flex}
+.mini-bar > span{height:100%}
+
+.chart-grid{display:grid;grid-template-columns:repeat(12,1fr);gap:14px;grid-auto-flow:row dense;margin-bottom:14px}
+.card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:16px 17px;box-shadow:var(--shadow);grid-column:span 12}
+.card-h{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:14px;gap:10px}
+.card-h h3{font-size:14px} .card-h .hint{font-size:11px;color:var(--muted);font-weight:500}
+@media(max-width:1000px){.chart-grid .card{grid-column:span 12 !important}}
+
+.hbars{display:flex;flex-direction:column;gap:9px}
+.hbar{display:grid;grid-template-columns:130px 1fr auto;align-items:center;gap:10px}
+.hbar .lab{font-size:12px;color:var(--ink2);text-align:start;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hbar .track{height:16px;background:var(--plane);border-radius:5px;overflow:hidden}
+.hbar .fill{height:100%;border-radius:5px;min-width:3px}
+.hbar .val{font-size:12px;color:var(--ink2);font-weight:650;min-width:30px;text-align:start}
+.cover-bar{height:30px;border-radius:8px;overflow:hidden;display:flex;border:1px solid var(--border2)}
+.cover-bar > div{height:100%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#fff;min-width:2px}
+.cover-legend{display:flex;gap:16px;flex-wrap:wrap;margin-top:14px}
+.leg{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--ink2)} .leg .sw{width:11px;height:11px;border-radius:3px} .leg b{color:var(--ink);font-weight:700}
+.chart svg{display:block;width:100%;overflow:visible}
+.axis-tick{font-size:10px;fill:var(--muted)} .med-line{stroke:var(--critical);stroke-width:1.5;stroke-dasharray:3 3}
+.tbl-find{border:1px solid var(--border);border-radius:8px;padding:7px 11px;font-family:inherit;font-size:12.5px;background:var(--surface);color:var(--ink);min-width:200px}
+.tbl-find:focus{outline:none;border-color:var(--accent)}
+/* custom search suggestions */
+.ac-panel{position:fixed;z-index:70;background:var(--card);border:1px solid var(--border);border-radius:10px;box-shadow:0 12px 34px rgba(0,0,0,.18);max-height:264px;overflow:auto;display:none;padding:4px}
+.ac-item{padding:8px 11px;font-size:12.5px;color:var(--ink);border-radius:7px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ac-item:hover,.ac-item.on{background:var(--plane)}
+/* clearer page-nav buttons */
+#t-home{border-color:var(--accent);color:var(--accent);background:var(--surface);font-weight:700}
+#t-home:hover{background:var(--accent);color:#fff}
+#g-back{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:700}
+#g-back:hover{filter:brightness(1.08)}
+
+.tbl-wrap{overflow:auto;max-height:520px;border:1px solid var(--border);border-radius:var(--radius);background:var(--card)}
+table{border-collapse:collapse;width:100%;font-size:12.5px}
+thead th{background:var(--plane);text-align:start;padding:10px 12px;font-weight:650;color:var(--ink2);border-bottom:1px solid var(--border);white-space:nowrap;position:sticky;top:0;cursor:pointer;user-select:none}
+tbody td{padding:9px 12px;border-bottom:1px solid var(--border2);white-space:nowrap}
+tbody tr:hover{background:var(--plane)}
+.pill{font-size:11px;font-weight:700;padding:2px 8px;border-radius:20px;display:inline-block}
+.gov{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px;margin-top:14px}
+.gov .g{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:14px 16px}
+.gov .g .v{font-size:20px;font-weight:700} .gov .g .l{font-size:11.5px;color:var(--muted);margin-top:3px}
+
+#tip{position:fixed;z-index:200;pointer-events:none;background:var(--ink);color:var(--surface);font-size:11.5px;padding:6px 9px;border-radius:7px;opacity:0;transition:opacity .1s;white-space:nowrap;box-shadow:0 4px 14px rgba(0,0,0,.25)}
+#toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%) translateY(20px);background:var(--ink);color:var(--surface);padding:10px 18px;border-radius:10px;font-size:13px;font-weight:600;opacity:0;transition:.25s;z-index:300;pointer-events:none}
+#toast.on{opacity:1;transform:translateX(-50%) translateY(0)}
+
+/* ===== Daleel theme overrides ===== */
+
+/* ===== مركز الدليل — brand theme (deep green + gold) ===== */
+:root{
+  --plane:#f4f6f1; --surface:#ffffff; --card:#ffffff;
+  --ink:#213430; --ink2:#46573A; --muted:#7c857a;
+  --grid:#e4e7df; --axis:#cdd2c6; --border:rgba(33,52,48,.13); --border2:rgba(33,52,48,.06);
+  --s1:#46573A; --s2:#8a7d3f; --s3:#BE913B; --s4:#6f8262; --s5:#3a4d5a; --s6:#a75b3b;
+  --b100:#e7ece3; --b200:#c9d5c1; --b300:#a3b599; --b400:#7d9070; --b500:#5c6f4c; --b600:#46573A; --b700:#2b3a2e;
+  --good:#3f8f4f; --warning:#c99a3a; --serious:#c47a4e; --critical:#b23b3b; --good-ink:#2c6b3a;
+  --accent:#46573A; --gold:#BE913B;
+  --shadow:0 12px 30px rgba(33,52,48,.10),0 5px 16px rgba(33,52,48,.06);
+}
+:root[data-theme="dark"]{
+  --surface:#18201c; --plane:#0e130f; --card:#1e2721; --ink:#f2f4ef; --ink2:#c9d2c2; --muted:#8b968a;
+  --grid:#2a332b; --axis:#3a463b; --border:rgba(255,255,255,.11); --border2:rgba(255,255,255,.06);
+  --b100:#2b3a2e; --b200:#37493a; --b300:#46573A; --b400:#5c6f4c; --b500:#7d9070; --b600:#a3b599; --b700:#cbd6c4;
+  --accent:#a7ba9b; --gold:#d4b46a; --good-ink:#5fbf6f;
+}
+body{font-family:'Alexandria','Tajawal',system-ui,"Segoe UI",Tahoma,sans-serif}
+#gate{background:radial-gradient(1200px 620px at 82% -12%,#e9efe1,transparent 60%),var(--plane)}
+:root[data-theme="dark"] #gate{background:radial-gradient(1200px 620px at 82% -12%,#16241a,transparent 60%),var(--plane)}
+.sect-lab .n{background:var(--gold)}
+.topbar{border-bottom:2px solid var(--gold);min-height:64px}
+/* topbar brand = compass icon (cropped from the lockup) + wordmark + gold tagline */
+.topbar .brand{align-items:center;gap:11px}
+.topbar .brand .logo{position:relative;width:43px;height:44px;overflow:hidden;background:none;border:none;box-shadow:none;padding:0;flex:none}
+.topbar .brand .logo img{position:absolute;height:61.6px;width:auto;max-width:none;left:-9.4px;top:-8.7px;display:block}
+.topbar .brand>div{display:flex;flex-direction:column;justify-content:center;gap:3px}
+.topbar .brand .name{display:block;font-size:17px;font-weight:800;color:var(--ink);letter-spacing:-.2px;line-height:1}
+.topbar .brand .role{display:block;font-size:10.5px;font-weight:600;color:var(--gold);line-height:1;opacity:.95}
+.daleel-hero{text-align:center;margin:4px 0 18px}
+.daleel-hero img{max-width:330px;width:82%;height:auto;display:block;margin:0 auto;filter:drop-shadow(0 6px 18px rgba(33,52,48,.10))}
+.topbar .spacer{display:flex;align-items:center;justify-content:center;padding:0 12px}
+.dl-date{color:var(--gold);font-size:12.5px;font-weight:700;letter-spacing:.2px;white-space:nowrap;display:inline-flex;align-items:center;gap:7px}
+.dl-date::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--gold);opacity:.7}
+#app{position:relative;z-index:1}
+.dl-footer{margin-top:22px;border-top:2px solid var(--gold);background:linear-gradient(180deg,#f7f9f3,var(--card));border-radius:14px;padding:18px 22px 14px;box-shadow:var(--shadow)}
+.dl-foot-in{display:flex;align-items:center;gap:14px}
+.dl-foot-in img{height:42px;width:auto}
+.dl-foot-txt{display:flex;flex-direction:column;gap:2px}
+.dl-foot-txt b{color:var(--ink);font-size:13.5px;font-weight:700}
+.dl-foot-txt span{color:var(--muted);font-size:11.5px;line-height:1.6}
+.dl-foot-copy{color:var(--muted);font-size:11px;border-top:1px dashed var(--border);padding-top:11px;margin-top:12px;text-align:center;letter-spacing:.2px}
+:root[data-theme="dark"] .dl-footer{background:linear-gradient(180deg,#1a231c,var(--card))}
+.dl-watermark{position:fixed;bottom:-26px;inset-inline-start:-24px;width:231px;height:236px;overflow:hidden;opacity:.05;pointer-events:none;z-index:0}
+.dl-watermark img{position:absolute;height:330px;width:auto;max-width:none;left:-50px;top:-47px}
+/* ===== sign-in + role badge (google-sheet edition) ===== */
+.signin-field input{width:100%;border:1px solid var(--border);border-radius:var(--radius-s);padding:11px 13px;font-family:inherit;font-size:14px;background:var(--surface);color:var(--ink)}
+.signin-field input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(70,87,58,.15)}
+.role-badge{font-size:11.5px;font-weight:700;padding:3px 11px;border-radius:20px;background:rgba(70,87,58,.10);color:var(--accent);white-space:nowrap}
+.role-badge.viewer{background:rgba(190,145,59,.14);color:#8a5d00}
+:root[data-theme="dark"] .role-badge.viewer{color:var(--gold)}
+.masked{filter:blur(4px);user-select:none;transition:filter .12s}
+.data-src{font-size:11px;color:var(--muted);display:inline-flex;align-items:center;gap:6px}
+.data-src .dot{width:7px;height:7px;border-radius:50%;background:var(--good)} .data-src .dot.local{background:var(--warning)}
+/* viewer role: read-only (hide add/edit/delete) + mask the name column */
+body.role-viewer #t-add,body.role-viewer #c-table td.act{display:none}
+body.role-viewer #c-table tbody td:first-child{filter:blur(4.5px);user-select:none}
+
+</style>
+</head>
+<body>
+
+<div id="gate">
+  <div class="gate-card">
+    <div class="daleel-hero"><img id="dl-hero-img" alt="مركز الدليل للتدريب والاستشارات الإنسانية"></div>
+    <h1>لوحة تحليل حالات الأيتام</h1>
+    <div class="sub">البيانات تُقرأ مباشرة من قاعدة بيانات SQL مركزية (Supabase) عبر واجهة آمنة. سجّل الدخول ببريدك الإلكتروني لعرض البيانات — وتُحدَّد صلاحيتك (عرض أو تعديل) تلقائيًا.</div>
+    <div class="sect-lab"><span class="n">↦</span> تسجيل الدخول</div>
+    <div class="field signin-field"><label>البريد الإلكتروني</label><input type="text" id="g-email" placeholder="you@gmail.com" autocomplete="username" inputmode="email"></div>
+    <div class="field signin-field"><label>كلمة المرور</label><input type="password" id="g-pass" placeholder="••••••••" autocomplete="current-password"></div>
+    <button class="btn primary" id="g-signin" style="width:100%;margin-top:6px">تسجيل الدخول ›</button>
+    <div class="err-box" id="g-err"></div>
+    <div class="gate-note">لا يُحفظ أي شيء على هذا الجهاز — البيانات حيّة من المصدر المركزي، وكل تعديل يُكتب مباشرة في الـSheet (للمصرَّح لهم بالتعديل فقط).</div>
+  </div>
+</div>
+
+<div id="app">
+  <div class="topbar">
+    <div class="brand"><div class="logo" id="b-logo"></div><div><div class="name" id="b-name">مركز الدليل</div><div class="role"></div></div></div>
+    <div class="spacer"><div class="dl-date" id="dl-date"></div></div>
+    <div class="tools">
+      <span class="data-src" id="data-src" title="مصدر البيانات"><span class="dot" id="src-dot"></span><span id="src-txt">—</span></span>
+      <span class="tsep"></span>
+      <span class="role-badge" id="role-badge">—</span>
+      <span class="tsep"></span>
+      <button class="btn sm" id="t-refresh" title="جلب أحدث البيانات من المصدر المركزي (تعديلات الآخرين)">⟳ تحديث</button>
+      <button class="btn sm" id="t-export" title="تنزيل ملف Excel: البيانات + ملخص إحصائي">تصدير التقرير</button>
+      <button class="btn sm ghost" id="t-theme" title="الوضع الليلي">◐</button>
+      <button class="btn sm" id="t-logout" title="تسجيل الخروج">خروج</button>
+    </div>
+  </div>
+  <div class="filters" id="filters"></div>
+  <div class="kpis" id="kpis"></div>
+  <div class="chart-grid" id="charts"></div>
+  <div class="card" style="margin-bottom:14px"><div class="card-h"><h3>سجل الحالات</h3><span class="hint" id="tbl-count"></span><input class="tbl-find" id="tbl-search" placeholder="ابحث عن يتيم لتعديله…" autocomplete="off" style="margin-inline-start:auto"><button class="btn sm primary" id="t-add">＋ إضافة حالة</button></div><div class="tbl-wrap" id="c-table"></div><div class="pager" id="tbl-foot"></div></div>
+  <div class="gov" id="gov"></div>
+  <footer class="dl-footer"><div class="dl-foot-in"><img id="dl-foot-logo" alt="مركز الدليل"><div class="dl-foot-txt"><b>مركز الدليل للتدريب والاستشارات الإنسانية</b><span>تمكين الأفراد والمنظمات الإنسانية من تحقيق الأثر والكفاءة في العمل الإنساني</span></div></div><div class="dl-foot-copy">© 2026 مركز الدليل — جميع الحقوق محفوظة · daleelconsult.org</div></footer>
+</div>
+<div class="dl-watermark"><img id="dl-wm-logo" alt=""></div>
+
+<div class="modal-ov" id="modal"><div class="modal">
+  <div class="modal-h"><h3 id="m-title">تعديل حالة</h3><button class="btn sm ghost" id="m-x">✕</button></div>
+  <div class="modal-b" id="m-body"></div>
+  <div class="mwarn" id="m-warn"></div>
+  <div class="modal-f"><span class="modal-err" id="m-err"></span><button class="btn sm ghost" id="m-cancel">إلغاء</button><button class="btn sm primary" id="m-save">حفظ الحالة</button></div>
+</div></div>
+<div id="tip"></div><div id="toast"></div>
+
+<script>
+/* fixed categorization model */
+const CASE_COLS=[["رقم اليتيم","id","str"],["رقم الأسرة","famId","str"],["الاسم الأول","first","str"],["اسم الأب","father","str"],["الجد","grand","str"],["العائلة","family","str"],["تاريخ الميلاد","dob","str"],["العمر","age","num"],["الجنسية","nat","str"],["الجنس","gender","str"],["اسم الأب الكامل","fatherFull","str"],["تاريخ وفاة الأب","fatherDeath","str"],["سبب الوفاة","deathCause","str"],["اسم الأم","motherName","str"],["الأم على قيد الحياة","motherAlive","str"],["الحالة الاجتماعية للأم","motherStatus","str"],["الأم تعمل","motherWorks","str"],["نوع عمل الأم","motherJob","str"],["اسم المعيل","guardian","str"],["صلة المعيل","relation","str"],["تعليم المعيل","guardianEdu","str"],["فئة الدخل","income","str"],["الدخل الشهري","incomeAmt","num"],["نوع السكن","housing","str"],["عدد أفراد الأسرة","famSize","num"],["عدد الذكور","males","num"],["عدد الإناث","females","num"],["أبناء يعملون","sonsWork","str"],["أبناء يدرسون","sonsStudy","str"],["يوجد مريض أو معاق","sick","str"],["حالة الأثاث","furniture","str"],["الأجهزة الكهربائية","appliances","str"],["الفرش","bedding","str"],["التعليم","eduState","str"],["العلاج","treatment","str"],["المدينة","city","str"],["الحي","hood","str"],["الصف الدراسي","grade","str"],["مؤشر الهشاشة","vuln","num"],["أولوية التدخل","priority","str"],["حالة بيانات اليتيم","dataStatus","str"],["حالة بيانات الأسرة","famDataStatus","str"],["حالة الكفالة","spStatus","str"],["نوع الدعم","spType","str"],["مبلغ الكفالة الشهري","spAmount","num"],["رمز الكافل","sponsor","str"],["تاريخ بداية الكفالة","spStart","str"],["تاريخ نهاية الكفالة","spEnd","str"]];
+const VISIT_COLS=[["رقم اليتيم","oid","str"],["تاريخ الزيارة","date","str"],["نتيجة الزيارة","result","str"],["تاريخ الزيارة القادمة","next","str"],["الباحث الاجتماعي","worker","str"]];
+const KEY2HDR={}; CASE_COLS.concat(VISIT_COLS).forEach(([h,k])=>KEY2HDR[k]=h);
+const HDR2KEY={}; CASE_COLS.forEach(([h,k])=>HDR2KEY[h]=k);
+
+/* PACKAGES — each = bundle of field keys */
+const PACKAGES=[
+  {id:'identity',core:true,label:'الهوية',desc:'الرقم والاسم والأسرة',fields:['id','first','father','grand','family','famId']},
+  {id:'demo',label:'العمر والجنس',desc:'العمر، الجنس، تاريخ الميلاد',fields:['dob','age','nat','gender']},
+  {id:'location',label:'الموقع',desc:'المحافظة والحي',fields:['city','hood']},
+  {id:'assess',label:'الهشاشة والأولوية',desc:'مؤشر الهشاشة وأولوية التدخل',fields:['vuln','priority']},
+  {id:'sponsor',label:'الكفالة',desc:'حالة الكفالة، النوع، المبلغ، الكافل',fields:['spStatus','spType','spAmount','sponsor','spStart','spEnd']},
+  {id:'econ',label:'الوضع الاقتصادي',desc:'الدخل، السكن، حجم الأسرة',fields:['income','incomeAmt','housing','famSize','males','females','sonsWork','sonsStudy']},
+  {id:'guardian',label:'المعيل والأسرة',desc:'المعيل، صلته، حالة الأم',fields:['guardian','relation','guardianEdu','motherName','motherAlive','motherStatus','motherWorks','motherJob','fatherFull','fatherDeath','deathCause']},
+  {id:'edu',label:'التعليم والصحة',desc:'التعليم، الصف، الأمراض/الإعاقة',fields:['eduState','grade','treatment','sick','furniture','appliances','bedding']},
+  {id:'quality',label:'جودة البيانات',desc:'اكتمال بيانات اليتيم والأسرة',fields:['dataStatus','famDataStatus']},
+  {id:'visits',label:'الزيارات',desc:'سجل الزيارات ونتائجها (تبويب منفصل)',fields:['__visits__']},
+];
+
+let DATA=[], VISITS=[], fileHandle=null, fileName=null, AVAIL=new Set(), HAS_VISITS=false;
+let SELECTED=new Set(['identity']);
+let state={ city:'', priority:'', sp:'', gender:'', q:'', tq:'', sort:{k:'id',dir:1}, page:0 };
+const TODAY=new Date();
+const BRANDING={ name:'', logo:'' };
+
+const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
+const fmt=n=>Number(n).toLocaleString('en-US');
+const pct=(a,b)=>b?Math.round(a/b*100):0;
+function mapRow(r,cols){const o={};cols.forEach(([ar,k,t])=>{let v=r[ar];if(v===''||v===undefined)v=null;o[k]=(t==='num')?(v===null?null:(isNaN(Number(v))?null:Number(v))):(v===null?null:(v instanceof Date?normDate(v):String(v).trim()));});return o;}
+/* field-type metadata for validation: choice(strict)/soft(known set, tolerant)/num(range)/text(free) */
+/* Arab-world nationalities → their cities (city list depends on the chosen nationality) */
+const NAT_CITIES={
+ 'عراقية':['بغداد','البصرة','نينوى','أربيل','النجف','كربلاء','بابل','ذي قار','الأنبار','ديالى','كركوك','صلاح الدين','واسط','ميسان','المثنى','القادسية','السليمانية','دهوك'],
+ 'سعودية':['الرياض','جدة','مكة المكرمة','المدينة المنورة','الدمام','الطائف','تبوك','أبها','حائل','بريدة','سكاكا','جازان','نجران','الباحة','الخبر','ينبع'],
+ 'مصرية':['القاهرة','الجيزة','الإسكندرية','الأقصر','أسوان','أسيوط','المنصورة','طنطا','الزقازيق','الفيوم','بورسعيد','السويس','دمياط','الإسماعيلية','المنيا','سوهاج'],
+ 'سورية':['دمشق','حلب','حمص','حماة','اللاذقية','طرطوس','دير الزور','الحسكة','الرقة','إدلب','درعا','السويداء','القنيطرة'],
+ 'أردنية':['عمّان','الزرقاء','إربد','العقبة','السلط','المفرق','الكرك','مأدبا','جرش','معان','عجلون','الطفيلة'],
+ 'لبنانية':['بيروت','طرابلس','صيدا','صور','زحلة','جونية','بعلبك','النبطية','جبيل','بعبدا'],
+ 'فلسطينية':['القدس','غزة','رام الله','نابلس','الخليل','بيت لحم','جنين','طولكرم','رفح','أريحا','قلقيلية','خان يونس'],
+ 'كويتية':['مدينة الكويت','حولي','الفروانية','الأحمدي','الجهراء','مبارك الكبير'],
+ 'إماراتية':['أبوظبي','دبي','الشارقة','عجمان','رأس الخيمة','الفجيرة','أم القيوين','العين'],
+ 'قطرية':['الدوحة','الريان','الوكرة','الخور','أم صلال','الشمال','الظعاين'],
+ 'بحرينية':['المنامة','المحرق','الرفاع','مدينة عيسى','مدينة حمد','سترة'],
+ 'عمانية':['مسقط','صلالة','صحار','نزوى','صور','البريمي','الرستاق','إبراء','عبري'],
+ 'يمنية':['صنعاء','عدن','تعز','الحديدة','إب','المكلا','ذمار','صعدة','مأرب'],
+ 'ليبية':['طرابلس','بنغازي','مصراتة','الزاوية','البيضاء','سبها','طبرق','سرت','درنة'],
+ 'تونسية':['تونس','صفاقس','سوسة','القيروان','بنزرت','قابس','أريانة','المنستير','نابل','قفصة'],
+ 'جزائرية':['الجزائر','وهران','قسنطينة','عنابة','البليدة','باتنة','سطيف','سيدي بلعباس','بسكرة','تلمسان','ورقلة'],
+ 'مغربية':['الرباط','الدار البيضاء','مراكش','فاس','طنجة','أكادير','مكناس','وجدة','القنيطرة','تطوان','آسفي'],
+ 'سودانية':['الخرطوم','أم درمان','بورتسودان','كسلا','الأبيض','نيالا','القضارف','ود مدني','الفاشر'],
+ 'موريتانية':['نواكشوط','نواذيبو','كيفة','روصو','كيهيدي','زويرات','أطار'],
+ 'صومالية':['مقديشو','هرجيسا','بوصاصو','كيسمايو','بربرة','بيدوا','مركا'],
+ 'جيبوتية':['جيبوتي','علي صبيح','دخيل','أوبوك','تاجورة'],
+ 'قمرية':['موروني','موتسامودو','فومبوني']
+};
+const NATIONALITIES=Object.keys(NAT_CITIES);
+const ALL_CITIES=[...new Set([].concat(...Object.values(NAT_CITIES)))];
+const GOVS=NAT_CITIES['عراقية'];   // back-compat alias
+const FIELD_META={
+  age:{t:'num',min:0,max:30,from:'dob'}, vuln:{t:'num',min:0,max:100}, incomeAmt:{t:'num',min:0}, spAmount:{t:'num',min:0},
+  famSize:{t:'num',min:1,max:30}, males:{t:'num',min:0,max:20}, females:{t:'num',min:0,max:20},
+  gender:{t:'choice',opts:['ذكر','أنثى']}, priority:{t:'choice',opts:['حرجة','عالية','متوسطة','منخفضة']},
+  spStatus:{t:'choice',opts:['مكفول','غير مكفول','قيد الدراسة','منتهية']}, sick:{t:'choice',opts:['نعم','لا']},
+  motherAlive:{t:'choice',opts:['نعم','لا']}, dataStatus:{t:'choice',opts:['مكتملة','تحتاج تحديث','ناقصة']},
+  famDataStatus:{t:'choice',opts:['مكتملة','تحتاج تحديث','ناقصة']}, sonsWork:{t:'choice',opts:['نعم','لا']}, sonsStudy:{t:'choice',opts:['نعم','لا']}, motherWorks:{t:'choice',opts:['نعم','لا']},
+  spType:{t:'soft',opts:['سلة غذائية','ملابس','تعليم','صحة','كفالة نقدية']},
+  income:{t:'soft',opts:['لا يوجد دخل ثابت','أقل من 250,000','250,000-500,000','أكثر من 500,000']},
+  housing:{t:'soft',opts:['إيجار','ملك','منزل شعبي','مشاركة سكن','مخيم/سكن مؤقت']},
+  relation:{t:'soft',opts:['الأم','الجد','الجدة','العم','الخال','الأخ الأكبر','الأخت الكبرى']},
+  eduState:{t:'soft',opts:['حكومي','أهلي','غير منتظم']}, treatment:{t:'soft',opts:['حكومي','أهلي','غير منتظم']},
+  nat:{t:'soft',opts:NATIONALITIES},                         // fixed Arab-world nationality list
+  city:{t:'soft',opts:ALL_CITIES,dep:'nat'},                 // fixed city list, filtered by the chosen nationality
+  // names: free text, but a pure number is illogical → rejected
+  first:{t:'name'}, father:{t:'name'}, grand:{t:'name'}, family:{t:'name'}, fatherFull:{t:'name'}, motherName:{t:'name'}, guardian:{t:'name'}, deathCause:{t:'name'}, motherJob:{t:'name'},
+  // dates: must be a real date (id/famId/sponsor stay flexible codes — NOT forced numeric, since real ids look like O0001/F0001)
+  dob:{t:'date'}, fatherDeath:{t:'date'}, spStart:{t:'date'}, spEnd:{t:'date'}
+};
+function fieldType(k){return (FIELD_META[k]&&FIELD_META[k].t)|| 'text';}
+function parseD(s){if(!s)return null;const p=String(s).split(/[-/]/);return p.length>=3?new Date(+p[0],+p[1]-1,+p[2]):null;}
+function toast(m){const t=$('#toast');t.textContent=m;t.classList.add('on');setTimeout(()=>t.classList.remove('on'),2600);}
+function has(...keys){return keys.every(k=>AVAIL.has(k));}
+const tip=$('#tip');
+function showTip(html,e){tip.innerHTML=html;tip.style.opacity=1;tip.style.left=(e.clientX+12)+'px';tip.style.top=(e.clientY+12)+'px';}
+function hideTip(){tip.style.opacity=0;}
+function bindTips(sel){$$(sel).forEach(el=>{el.addEventListener('mousemove',e=>showTip(el.dataset.tip,e));el.addEventListener('mouseleave',hideTip);});}
+function getFiltered(){
+  return DATA.filter(d=>{
+    if(state.city && d.city!==state.city) return false;
+    if(state.priority && d.priority!==state.priority) return false;
+    if(state.sp && d.spStatus!==state.sp) return false;
+    if(state.gender && d.gender!==state.gender) return false;
+    if(state.q){const q=state.q.trim();if(q && !(String(d.name||'').includes(q)||String(d.id||'').includes(q))) return false;}
+    return true;
+  });
+}
+
+</script>
+<script src="dashboard.js?v=4"></script>
+</body>
+</html>
