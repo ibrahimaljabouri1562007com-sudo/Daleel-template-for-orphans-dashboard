@@ -33,5 +33,25 @@ add the **RLS policies + auth** (viewer read-only, editor/admin write — enforc
 database), and **verify it live** against your Supabase.
 
 ---
+
+## Addendum (2026-07-16) — visits WRITE policies (needed by the Excel bulk import)
+The step-3b hardening added write policies on **`orphans` only** (the dashboard's single-case
+editor never writes visits). The **«إضافة حالات من Excel»** feature also inserts into
+**`visits`** — without these, cases upload fine but visits are refused (`403`). Run once in
+**SQL Editor**:
+
+```sql
+create policy "bulk_ins_visits" on visits for insert to authenticated
+  with check (public.my_role() in ('admin','editor'));
+create policy "bulk_upd_visits" on visits for update to authenticated
+  using (public.my_role() in ('admin','editor')) with check (public.my_role() in ('admin','editor'));
+create policy "bulk_del_visits" on visits for delete to authenticated
+  using (public.my_role() in ('admin','editor'));
+```
+
+*(The importer degrades gracefully without them — cases land, visits are reported as skipped —
+but run this so visit rows in the mould import too.)*
+
+---
 *Prepared here: `schema.sql` (tables), `seed.sql` (data), `build_sql.py` (the migration, re-runnable
 if the data changes), `data/` (the SEPARATE-step source).*

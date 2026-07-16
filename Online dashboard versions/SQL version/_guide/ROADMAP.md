@@ -72,6 +72,38 @@ The dashboard UI/engine (KPIs, charts, editing, roles) is reused from the Daleel
 - code tidy: `dashboard.js` header rewritten for this edition; inherited Excel-onboarding functions
   flagged as unused dead code (kept for engine parity, safe).
 
+### Step 6 — BULK IMPORT (Excel → DB) ✅  — the third input door
+The local edition's **mould + gatekeeper**, revived and re-pointed at the database: a dedicated
+button beside «إضافة حالة» opens a modal with **two actions** — download the **FULL mould** (all
+packages, no picker) / **connect a filled Excel** — the gatekeeper validates, then the valid rows
+are **uploaded to Postgres in chunks**.
+- rule (user-chosen, option a): **UPSERT by «رقم اليتيم»** — existing id = update, new id = add;
+  in-file duplicate ids collapse to the last occurrence (one upsert can't hit a row twice).
+  Visits = **insert-only**, deduped against the DB (exact-row match). Idempotent → a failed run
+  is safely retried with the same file.
+- one-way import: the Excel file is a **vehicle**, the DB stays the source of truth — no file
+  link/sync-back (that's the local edition's job), so a plain `<input type=file>` works everywhere.
+- chunking (`CHUNK=400`) = delivery safety (payload size / statement timeout / progress bar) —
+  NOT cost (Supabase pricing is size-based, not per-request).
+- source: `index.html` (`#t-import` button, `#ximp` modal, `vendor/xlsx.full.min.js`, `?v=5`) ·
+  `dashboard.js` → **downloadTemplate** (full mould), **connectExcel**/`#x-file`, **importBuffer**
+  → **validate** → **showReport** (now renders in `#x-report`, proceed = «رفع إلى قاعدة البيانات»),
+  **uploadImport** (chunked upsert/insert + progress), **openImport/closeImport** wiring.
+- reads with SheetJS (`xlsx.full.min.js`, copied from the local edition — ExcelJS's reader chokes
+  on the mould's full-column validations); writes the mould with ExcelJS. Editor/admin only
+  (button hidden for viewers; RLS enforces regardless).
+- **brand-themed mould** (`?v=6`): the mould's header follows the page theme at runtime —
+  `themeTok('--accent')` deep-green fill + `--gold` underline (user rule: everything a branded
+  project emits follows the brand; no hardcoded hex).
+- DB gap found + handled: `visits` had **no write policies** (step 3b covered `orphans` only) →
+  importer degrades gracefully (cases land, visits reported); fix SQL = `SETUP.md` addendum.
+- API semantics proven live via authenticated curl (self-cleaned `ZZ-TEST` rows): batch upsert 201,
+  re-upsert updates (not duplicates), duplicate-id-in-one-request fails (21000 — why we collapse).
+- catalog 🟢: **Excel mould + gatekeeper** (existing unit, now backend-fed) + new jot: chunked
+  bulk upload to a DB API.
+
 ## Open / next
-- Nothing pending — the SQL edition is built, secured (Auth + RLS), documented, and packaged.
+- Nothing pending — built, secured (Auth + RLS), documented, packaged, and bulk-import enabled.
+- (Later, separate project) the OCR ingestion door: scan → OCR → confidence gate → this same
+  mould/gatekeeper/chunked-upload pipeline.
 - (Optional later) custom SMTP for password-reset emails · scheduled DB backups in Supabase.

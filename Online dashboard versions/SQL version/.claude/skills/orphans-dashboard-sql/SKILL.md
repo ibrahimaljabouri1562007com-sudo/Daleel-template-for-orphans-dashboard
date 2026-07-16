@@ -21,12 +21,17 @@ different data + auth layer). Read `CLAUDE.md` first (the rules); `_guide/ROADMA
 step map with source anchors.
 
 ## Where things live
-- `index.html` — shell + Daleel theme + **login gate** (email + password). Served → **`?v=N`**.
+- `index.html` — shell + Daleel theme + **login gate** (email + password) + the **bulk-import
+  modal** (`#ximp`, opened by `#t-import` beside «إضافة حالة»). Served → **`?v=N`**.
 - `dashboard.js` — engine + **supabase-js data layer** (at the bottom): `sb.auth.signInWithPassword`,
   `sb.from(...).select/upsert/delete`, `loadAfterAuth`, `refreshFromDb`, session auto-resume,
-  `normRole`, `pickCols`. `SUPA_URL`/`SUPA_KEY` inline. *(Excel-onboarding functions above are
-  inherited-but-unused dead code — don't wire them.)*
-- `vendor/supabase.js` (auth+queries) · `vendor/exceljs.min.js` (report export).
+  `normRole`, `pickCols`. `SUPA_URL`/`SUPA_KEY` inline. Plus the **Excel bulk import** (LIVE, not
+  dead code): `downloadTemplate` (FULL mould, theme-aware header via `themeTok`) → `importBuffer` →
+  `validate`/`showReport` (gatekeeper, renders in `#x-report`) → `uploadImport` (**chunked** upsert
+  by id — existing = update, new = add; visits insert-only deduped; in-file duplicate ids collapse
+  before upsert). Only `renderPkgs`/`loadSample`/`buildWorkbook`/`saveToExcel` stay unused.
+- `vendor/supabase.js` (auth+queries) · `vendor/exceljs.min.js` (mould/report, WRITE) ·
+  `vendor/xlsx.full.min.js` (SheetJS — import READ; ExcelJS's reader chokes on the mould).
 - The **database** (in Supabase, not this repo): tables `orphans`/`visits`/`users`, RLS policies,
   `my_role()`, the `on_auth_user_created` auto-sync trigger.
 - `build_sql.py`/`make_csv.py` (migration) · `schema.sql`/`seed.sql`/CSVs · `SETUP.md`.
@@ -47,6 +52,11 @@ step map with source anchors.
 - Don't use the publishable key alone for data (anon role → RLS gives nothing, by design).
 - Don't write **real** test rows to the live DB (add a `ZZ-TEST-…` row and delete it).
 - Don't hand-edit `dashboard-sql.html` — rebuild it.
+- Don't change the bulk-import conflict rule (upsert by id) silently, don't auto-upload on file
+  pick (keep the gatekeeper report + explicit «رفع» click), and don't re-add a file link/sync-back
+  — the import is ONE-WAY; the DB is the source of truth.
+- Don't hardcode a hex in generated artifacts (mould/report headers) — read the theme tokens at
+  runtime (`themeTok('--accent'…)`, gold underline), so the brand overlay themes them too.
 
 ## Supabase config that must hold
 Email provider **on** · **Confirm-email OFF** · **Allow new signups OFF**. Adding a user = create

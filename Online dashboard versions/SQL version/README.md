@@ -25,6 +25,16 @@ two fronts this edition fixes:
 - The client shows/hides tools for convenience, but the **database is the real guard** — it refuses
   unauthorized reads/writes regardless of the dashboard.
 
+## Adding data — three doors, one gatekeeper
+1. **«إضافة حالة»** — one case at a time, in a validated form.
+2. **«إضافة حالات من Excel»** (editor/admin) — bulk: download the **full Excel mould** (dropdowns +
+   validation baked in), fill it, connect it back. The **gatekeeper** checks every row/cell and shows
+   its report; on confirm, the valid rows are **uploaded to the database in chunks** (with a progress
+   bar). Rule: an existing «رقم يتيم» is **updated**, a new one is **added** — so re-importing a
+   corrected master sheet just works (and retrying after a network failure is safe). Visits rows are
+   added only if not already present.
+3. *(Planned, separate project)* scanned-paper OCR → the same mould + gatekeeper + upload pipeline.
+
 ## Managing your team (no code, ever)
 A user = **two things, matched by email:**
 1. **Login** → Authentication → Users → *Add user* (email + password).
@@ -38,7 +48,7 @@ edit the `users` table to *promote* someone. Remove access = delete the login.
 SQL version/
 ├── index.html              ← the dashboard (Daleel theme + login gate)   [served]
 ├── dashboard.js            ← engine + Supabase-Auth data layer (versioned ?v=N)
-├── vendor/                 ← supabase.js (auth+queries) · exceljs (report export)
+├── vendor/                 ← supabase.js (auth+queries) · exceljs (mould/report, write) · xlsx (import, read)
 ├── assets/                 ← Daleel logo + fonts
 ├── data/                   ← cases.json / visits.json (the SEPARATE-step source, for migration)
 ├── build_sql.py · make_csv.py   ← JSON → schema.sql + seed.sql + CSVs (the migration)

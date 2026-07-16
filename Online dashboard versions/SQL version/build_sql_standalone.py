@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """WRAP the SQL / Supabase edition into ONE standalone HTML file.
 
-Inlines the LOCAL deps — supabase-js + ExcelJS (vendor), the engine (dashboard.js),
-the Daleel logo + fonts (as data URIs) — into a single `dashboard-sql.html`.
+Inlines the LOCAL deps — supabase-js + ExcelJS + SheetJS/XLSX (vendor), the engine
+(dashboard.js), the Daleel logo + fonts (as data URIs) — into a single `dashboard-sql.html`.
 
 NOTE: this file is single-file but **online by design** — it connects to the live
 Supabase (Postgres) backend at runtime (real login + RLS). That HTTPS call is the
@@ -11,7 +11,7 @@ intended dependency, not something to inline. Host the one file on any static ho
 Base files (index.html, dashboard.js, vendor/, assets/) are preserved untouched.
 Run:  python build_sql_standalone.py
 """
-import os, base64, json, sys
+import os, re, base64, json, sys
 sys.stdout.reconfigure(encoding='utf-8')
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -23,6 +23,7 @@ def b64(p):
 html    = rd(os.path.join(HERE, 'index.html'))
 supajs  = rd(os.path.join(HERE, 'vendor', 'supabase.js'))
 exceljs = rd(os.path.join(HERE, 'vendor', 'exceljs.min.js'))
+xlsxjs  = rd(os.path.join(HERE, 'vendor', 'xlsx.full.min.js'))
 dashjs  = rd(os.path.join(HERE, 'dashboard.js'))
 
 # ── brand assets → data URIs (logo + Alexandria/Tajawal fonts) ──────────────
@@ -51,12 +52,15 @@ html = html.replace('<head>', '<head>\n' + BANNER)
 html = html.replace('<link rel="stylesheet" href="assets/fonts/fonts.css">',
     '<!-- ===== FONTS · Alexandria / Tajawal (embedded) ===== -->\n<style id="dl-fonts">' + fonts + '</style>')
 html = html.replace('<script src="vendor/exceljs.min.js"></script>',
-    '<!-- ===== VENDOR · ExcelJS (formatted report export) ===== -->\n<script>' + esc(exceljs) + '</script>')
+    '<!-- ===== VENDOR · ExcelJS (mould + formatted report, write) ===== -->\n<script>' + esc(exceljs) + '</script>')
+html = html.replace('<script src="vendor/xlsx.full.min.js"></script>',
+    '<!-- ===== VENDOR · SheetJS/XLSX (bulk-import read) ===== -->\n<script>' + esc(xlsxjs) + '</script>')
 html = html.replace('<script src="vendor/supabase.js"></script>',
     '<!-- ===== VENDOR · supabase-js (Auth + queries) ===== -->\n<script>' + esc(supajs) + '</script>')
-html = html.replace('<script src="dashboard.js?v=4"></script>',
-    '<!-- ===== BRAND asset (inlined) ===== -->\n<script>window.__DL_LOGO=' + json.dumps(LOGO) + ';</script>\n'
-    '<!-- ===== ENGINE · dashboard.js (Supabase Auth + RLS data layer) ===== -->\n<script>' + esc(dashjs) + '</script>')
+html = re.sub(r'<script src="dashboard\.js\?v=\d+"></script>',   # any ?v=N — no double-bump gotcha
+    lambda m: ('<!-- ===== BRAND asset (inlined) ===== -->\n<script>window.__DL_LOGO=' + json.dumps(LOGO) + ';</script>\n'
+    '<!-- ===== ENGINE · dashboard.js (Supabase Auth + RLS data layer) ===== -->\n<script>' + esc(dashjs) + '</script>'),
+    html, count=1)
 
 OUT = os.path.join(HERE, 'dashboard-sql.html')
 with open(OUT, 'w', encoding='utf-8') as f: f.write(html)

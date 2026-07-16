@@ -7,6 +7,7 @@
 <!-- served edition (SQL version): reads a central Supabase (Postgres) database via its REST API. Assets are external (not an offline single file). -->
 <link rel="stylesheet" href="assets/fonts/fonts.css">
 <script src="vendor/exceljs.min.js"></script>
+<script src="vendor/xlsx.full.min.js"></script>
 <script src="vendor/supabase.js"></script>
 <style>
 
@@ -268,8 +269,8 @@ body{font-family:'Alexandria','Tajawal',system-ui,"Segoe UI",Tahoma,sans-serif}
 .masked{filter:blur(4px);user-select:none;transition:filter .12s}
 .data-src{font-size:11px;color:var(--muted);display:inline-flex;align-items:center;gap:6px}
 .data-src .dot{width:7px;height:7px;border-radius:50%;background:var(--good)} .data-src .dot.local{background:var(--warning)}
-/* viewer role: read-only (hide add/edit/delete) + mask the name column */
-body.role-viewer #t-add,body.role-viewer #c-table td.act{display:none}
+/* viewer role: read-only (hide add/edit/delete + bulk import) + mask the name column */
+body.role-viewer #t-add,body.role-viewer #t-import,body.role-viewer #c-table td.act{display:none}
 body.role-viewer #c-table tbody td:first-child{filter:blur(4.5px);user-select:none}
 
 </style>
@@ -308,7 +309,7 @@ body.role-viewer #c-table tbody td:first-child{filter:blur(4.5px);user-select:no
   <div class="filters" id="filters"></div>
   <div class="kpis" id="kpis"></div>
   <div class="chart-grid" id="charts"></div>
-  <div class="card" style="margin-bottom:14px"><div class="card-h"><h3>سجل الحالات</h3><span class="hint" id="tbl-count"></span><input class="tbl-find" id="tbl-search" placeholder="ابحث عن يتيم لتعديله…" autocomplete="off" style="margin-inline-start:auto"><button class="btn sm primary" id="t-add">＋ إضافة حالة</button></div><div class="tbl-wrap" id="c-table"></div><div class="pager" id="tbl-foot"></div></div>
+  <div class="card" style="margin-bottom:14px"><div class="card-h"><h3>سجل الحالات</h3><span class="hint" id="tbl-count"></span><input class="tbl-find" id="tbl-search" placeholder="ابحث عن يتيم لتعديله…" autocomplete="off" style="margin-inline-start:auto"><button class="btn sm" id="t-import" title="إضافة حالة أو مئات الحالات دفعة واحدة من ملف Excel — تنزيل القالب، ثم ربط الملف المعبّأ">إضافة حالات من Excel</button><button class="btn sm primary" id="t-add">＋ إضافة حالة</button></div><div class="tbl-wrap" id="c-table"></div><div class="pager" id="tbl-foot"></div></div>
   <div class="gov" id="gov"></div>
   <footer class="dl-footer"><div class="dl-foot-in"><img id="dl-foot-logo" alt="مركز الدليل"><div class="dl-foot-txt"><b>مركز الدليل للتدريب والاستشارات الإنسانية</b><span>تمكين الأفراد والمنظمات الإنسانية من تحقيق الأثر والكفاءة في العمل الإنساني</span></div></div><div class="dl-foot-copy">© 2026 مركز الدليل — جميع الحقوق محفوظة · daleelconsult.org</div></footer>
 </div>
@@ -319,6 +320,25 @@ body.role-viewer #c-table tbody td:first-child{filter:blur(4.5px);user-select:no
   <div class="modal-b" id="m-body"></div>
   <div class="mwarn" id="m-warn"></div>
   <div class="modal-f"><span class="modal-err" id="m-err"></span><button class="btn sm ghost" id="m-cancel">إلغاء</button><button class="btn sm primary" id="m-save">حفظ الحالة</button></div>
+</div></div>
+<!-- Excel bulk import: download the FULL mould / connect a filled one → gatekeeper → chunked upload to the DB -->
+<div class="modal-ov" id="ximp"><div class="modal" style="max-width:660px">
+  <div class="modal-h"><h3>إضافة حالات من ملف Excel</h3><button class="btn sm ghost" id="x-x">✕</button></div>
+  <div class="modal-b">
+    <div style="color:var(--ink2);font-size:13px;line-height:1.8;margin-bottom:14px">أضِف حالة أو مئات الحالات دفعة واحدة: نزّل <b>القالب الكامل</b>، عبّئه في Excel، ثم اربطه هنا — تُفحص البيانات أولًا (بوّابة الجودة) ثم تُرفع الصفوف الصالحة إلى قاعدة البيانات مباشرة.</div>
+    <div class="gate-actions">
+      <button class="btn" id="x-template">تنزيل قالب Excel الكامل</button>
+      <button class="btn primary" id="x-connect">ربط ملف Excel والبدء</button>
+    </div>
+    <input type="file" id="x-file" accept=".xlsx" style="display:none">
+    <div class="err-box" id="x-err"></div>
+    <div class="report" id="x-report"></div>
+    <div id="x-prog" style="display:none;margin-top:14px">
+      <div id="x-prog-txt" style="font-size:12.5px;color:var(--ink2);font-weight:600;margin-bottom:6px">…</div>
+      <div class="mini-bar" style="margin-top:0"><span id="x-prog-fill" style="width:0%;background:var(--good)"></span></div>
+    </div>
+    <div class="gate-note">القاعدة: صف يحمل «رقم يتيم» موجودًا مسبقًا <b>يُحدَّث</b> ببيانات الملف، والرقم الجديد <b>يُضاف</b>. الرفع يتم على دفعات تلقائيًا، وإعادة رفع الملف نفسه آمنة.</div>
+  </div>
 </div></div>
 <div id="tip"></div><div id="toast"></div>
 
@@ -421,6 +441,6 @@ function getFiltered(){
 }
 
 </script>
-<script src="dashboard.js?v=4"></script>
+<script src="dashboard.js?v=6"></script>
 </body>
 </html>

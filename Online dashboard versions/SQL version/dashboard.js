@@ -6,11 +6,19 @@
  *
  * Runs AFTER index.html defines the shared data model + state (CASE_COLS /
  * VISIT_COLS / FIELD_META / NAT_CITIES / state / BRANDING), and after the vendor
- * libs load: supabase-js (auth + queries) and ExcelJS (formatted report export).
+ * libs load: supabase-js (auth + queries), ExcelJS (mould + formatted report,
+ * write) and SheetJS/XLSX (import, read — ExcelJS chokes on full-column validations).
  *
  * WHAT'S LIVE IN THIS EDITION:
  *   • DATA LAYER (at the very bottom) — Supabase Auth + Postgres via supabase-js:
  *       signInWithPassword → session token → RLS-gated sb.from().select/upsert/delete.
+ *   • BULK IMPORT (Excel) — the local edition's mould + gatekeeper, revived and
+ *       re-pointed at the DB: the «إضافة حالات من Excel» modal downloads the FULL
+ *       mould (downloadTemplate — all packages, no picker) or imports a filled one
+ *       (importBuffer → validate → showReport), then uploadImport ships the valid
+ *       rows to Postgres in CHUNKS (upsert by id: existing row = update, new = add;
+ *       visits = insert new rows only). One-way import — the file is a vehicle, the
+ *       DB stays the source of truth. Editor/admin only (RLS enforces regardless).
  *   • measures — KPIs + charts (coverage, vuln, priority, geo, income, housing, age,
  *       visits, cov-by-city) + governance strip.
  *   • editing — add / edit / delete modal (mandatory + soft rules).
@@ -18,9 +26,8 @@
  *   • toolbar · role UI · brand.
  *
  * INHERITED BUT UNUSED HERE (kept for parity with the offline build; never called —
- * safe dead code): the bring-your-own-Excel onboarding — renderPkgs, downloadTemplate,
- * connectExcel, importBuffer/validate/showReport, loadSample, buildWorkbook/saveToExcel.
- * The SQL edition replaces all of that with the sign-in + live-DB data layer below.
+ * safe dead code): renderPkgs (no package picker here — the mould is always full),
+ * loadSample, buildWorkbook/saveToExcel (no local file to sync back to).
  *
  * Served edition — bump `dashboard.js?v=N` in index.html on edit. Real guard = RLS.
  * See README.md / CLAUDE.md.
@@ -41,12 +48,11 @@ function renderPkgs(){
     renderPkgs();
   }));
 }
-/* NOTE (google-sheet edition): the Excel onboarding (package picker / template /
- * connect-file / sample) is removed — this edition signs in and loads live from the
- * Google Sheet via the Apps Script API. See the DATA LAYER section at the end.
- * renderPkgs / downloadTemplate / connectExcel / importBuffer / loadSample remain
- * defined but unused (harmless). */
-function gateErr(msg){ const b=$('#g-err'); if(b){ b.innerHTML=msg||''; b.style.display=msg?'block':'none'; } }
+/* NOTE (SQL edition): the gate is a LOGIN (no onboarding) — but the Excel mould +
+ * gatekeeper below are LIVE again, revived as the bulk-import feature («إضافة حالات
+ * من Excel»): downloadTemplate/connectExcel/importBuffer/validate/showReport feed
+ * uploadImport (chunked upsert to the DB). Only renderPkgs/loadSample stay unused. */
+function gateErr(msg){ const b=$('#g-err'); if(b){ b.innerHTML=msg||''; b.style.display=msg?'block':'none'; } }   // login-gate errors (#g-err)
 
 /* ---------- template generator (from selected packages) ---------- */
 function selectedCaseCols(){
@@ -55,13 +61,19 @@ function selectedCaseCols(){
 }
 const NOTES={priority:'القيم: حرجة، عالية، متوسطة، منخفضة',spStatus:'القيم: مكفول، غير مكفول، قيد الدراسة، منتهية',gender:'القيم: ذكر، أنثى',vuln:'رقم من 0 إلى 100',age:'رقم (سنوات)',dataStatus:'القيم: مكتملة، تحتاج تحديث، ناقصة',sick:'القيم: نعم، لا',motherAlive:'القيم: نعم، لا',id:'رقم فريد لكل يتيم (إلزامي)'};
 function colLtr(n){ let s=''; while(n>0){ n--; s=String.fromCharCode(65+(n%26))+s; n=Math.floor(n/26); } return s; }
+/* header fill follows the PAGE THEME at runtime (Daleel deep-green + gold underline here) —
+ * read the tokens, never hardcode a hex (same rule as exportReport). */
+function themeTok(name, fallback){
+  const v=getComputedStyle(document.documentElement).getPropertyValue(name).trim().replace('#','');
+  return /^[0-9a-fA-F]{6}$/.test(v) ? ('FF'+v.toUpperCase()) : fallback;
+}
 function styleHeader(row){
+  const HEAD=themeTok('--accent','FF2A78D6'), LINE=themeTok('--gold','FF184F95');
   row.height=22; row.font={bold:true,color:{argb:'FFFFFFFF'}}; row.alignment={horizontal:'center',vertical:'middle'};
-  row.eachCell(c=>{ c.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FF2A78D6'}}; c.border={bottom:{style:'thin',color:{argb:'FF184F95'}}}; });
+  row.eachCell(c=>{ c.fill={type:'pattern',pattern:'solid',fgColor:{argb:HEAD}}; c.border={bottom:{style:'medium',color:{argb:LINE}}}; });
 }
 async function downloadTemplate(){
-  BRANDING.name=$('#g-name').value.trim()||BRANDING.name;
-  const cols=selectedCaseCols();
+  const cols=selectedCaseCols();   // SQL edition: SELECTED = all packages (set by openImport) → the FULL mould
   if(!window.ExcelJS){ toast('تعذّر تحميل محرّك القوالب'); return; }
   const wb=new ExcelJS.Workbook();
 
@@ -164,27 +176,20 @@ async function downloadTemplate(){
 }
 
 /* ---------- import + detect + validate ---------- */
-async function connectExcel(){
-  BRANDING.name=$('#g-name').value.trim()||'مؤسسة بلا اسم'; gateErr('');
-  if(window.showOpenFilePicker){
-    try{ const [h]=await window.showOpenFilePicker({types:[{description:'Excel',accept:{'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet':['.xlsx']}}]});
-      fileHandle=h; fileName=h.name;
-      if(h.requestPermission){ try{ await h.requestPermission({mode:'readwrite'}); }catch(_){} }   // ask for write access upfront so auto-save works
-      const f=await h.getFile(); await importBuffer(await f.arrayBuffer());
-    }catch(e){ if(e && e.name!=='AbortError') gateErr('تعذّر فتح الملف.'); }
-  } else { $('#g-file').click(); }
-}
-let pendingLoad=null;
+/* SQL edition: ONE-WAY import — the file is read once and its rows go to the DB.
+ * No File System Access / write-back (that's the local edition's sync); a plain
+ * file input works everywhere, including mobile. */
+function connectExcel(){ xErr(''); hideReport(); $('#x-file').click(); }
 /* logical helpers */
 function pureNum(s){ return /^-?\d+([.,]\d+)?$/.test(String(s).trim()); }                    // a value that is only digits
 function normDate(v){ if(v==null||v==='') return ''; if(v instanceof Date){ if(isNaN(v)) return ''; const y=v.getFullYear(),m=String(v.getMonth()+1).padStart(2,'0'),d=String(v.getDate()).padStart(2,'0'); return y+'-'+m+'-'+d; } return String(v).trim(); }
 function ageFromDob(s){ const d=parseD(normDate(s)); if(!d||isNaN(d)) return null; let a=TODAY.getFullYear()-d.getFullYear(); const mm=TODAY.getMonth()-d.getMonth(); if(mm<0||(mm===0&&TODAY.getDate()<d.getDate())) a--; return (a>=0&&a<130)?a:null; }
 function mapCells(cells){ const o={}; CASE_COLS.forEach(([ar,k,t])=>{ let v=cells[k]; if(v===''||v===undefined)v=null; o[k]=(t==='num')?(v===null?null:(isNaN(Number(v))?null:Number(v))):(v===null?null:(v instanceof Date?normDate(v):String(v).trim())); }); return o; }
 async function importBuffer(buf){
-  gateErr(''); hideReport();
-  let wb; try{ wb=XLSX.read(buf,{type:'array',cellDates:true}); }catch(e){ gateErr('الملف غير صالح كملف Excel.'); return; }
+  xErr(''); hideReport();
+  let wb; try{ wb=XLSX.read(buf,{type:'array',cellDates:true}); }catch(e){ xErr('الملف غير صالح كملف Excel.'); return; }
   const os=wb.Sheets['الأيتام']||wb.Sheets[wb.SheetNames[0]];
-  if(!os){ gateErr('لم يُعثر على تبويب «الأيتام» في الملف.'); return; }
+  if(!os){ xErr('لم يُعثر على تبويب «الأيتام» في الملف.'); return; }
   const aoa=XLSX.utils.sheet_to_json(os,{header:1,defval:''});           // AoA → true row indices
   const hdrs=((aoa[0])||[]).map(h=>String(h).trim());
   const colIdx={}; hdrs.forEach((h,i)=>{ if(HDR2KEY[h]!==undefined) colIdx[HDR2KEY[h]]=i; });
@@ -194,14 +199,9 @@ async function importBuffer(buf){
     const cells={}; presentKeys.forEach(k=>{ cells[k]=arr[colIdx[k]]; }); rows.push({row:r+1,cells}); }
   const vs=wb.Sheets['الزيارات']; const vraw= vs?XLSX.utils.sheet_to_json(vs,{defval:''}):[];
   const rep=validate(rows,presentKeys,vraw);
-  if(rep.blocks.length){ showReport(rep,null); return; }
-  pendingLoad=()=>{
-    DATA=rep.validRows.map(rw=>mapCells(rw.cells)); derive();
-    VISITS=vraw.map(r=>mapRow(r,VISIT_COLS)); HAS_VISITS=VISITS.length>0;
-    AVAIL=new Set(rep.usable); if(HAS_VISITS) AVAIL.add('__visits__');
-    startApp();
-  };
-  if(rep.warnings.length||rep.details.length) showReport(rep,pendingLoad); else pendingLoad();
+  // ALWAYS show the gatekeeper's verdict and require the explicit «رفع» click —
+  // this writes to the shared DB, so no silent auto-proceed even on a clean file.
+  showReport(rep, rep.blocks.length?null:()=>uploadImport(rep,vraw));
 }
 
 /* ---------- validator: row(identity) → cell → field → file, with a full details log ---------- */
@@ -261,8 +261,8 @@ function validate(rows, presentKeys, vraw){
   rep.details.sort((a,b)=>((ORD[a.col]??900)-(ORD[b.col]??900))||(a.row-b.row));
   return rep;
 }
-function showReport(rep, proceedFn){
-  const el=$('#g-report'), blocked=rep.blocks.length>0, hasNotes=rep.warnings.length||rep.details.length;
+function showReport(rep, proceedFn){   // renders inside the import modal (#x-report)
+  const el=$('#x-report'), blocked=rep.blocks.length>0, hasNotes=rep.warnings.length||rep.details.length;
   const cls= blocked?'block':(hasNotes?'warn':'ok');
   const head= blocked?'⛔ لا يمكن المتابعة — يلزم إصلاح الملف':(hasNotes?'الملف مقبول مع ملاحظات':'الملف سليم');
   let lines='';
@@ -277,12 +277,97 @@ function showReport(rep, proceedFn){
   const toggle = rep.details.length? `<button class="btn ghost sm" id="r-toggle" style="margin-inline-start:auto">عرض التفاصيل (${rep.details.length})</button>`:'';
   el.className='report '+cls;
   el.innerHTML=`<div class="r-h">${head}${toggle}</div><div class="r-body">${lines}${details}</div>`+
-    (blocked?'':`<div class="r-foot"><span class="msg">تُبنى اللوحة بالبيانات الصالحة فقط.</span><button class="btn primary sm" id="r-proceed">فتح اللوحة</button></div>`);
+    (blocked?'':`<div class="r-foot"><span class="msg">تُرفع الصفوف الصالحة فقط إلى قاعدة البيانات (${rep.validRows.length} حالة).</span><button class="btn primary sm" id="r-proceed">رفع إلى قاعدة البيانات ⤴</button></div>`);
   el.style.display='block';
   const tg=$('#r-toggle'); if(tg) tg.addEventListener('click',()=>{ const d=$('#r-details'); const on=d.style.display!=='none'; d.style.display=on?'none':'block'; tg.textContent=on?('عرض التفاصيل ('+rep.details.length+')'):'إخفاء التفاصيل'; });
-  if(!blocked && proceedFn) $('#r-proceed').addEventListener('click',()=>{ el.style.display='none'; proceedFn(); });
+  if(!blocked && proceedFn) $('#r-proceed').addEventListener('click',()=>{ $('#r-proceed').disabled=true; proceedFn(); });
 }
-function hideReport(){ const el=$('#g-report'); if(el) el.style.display='none'; }
+function hideReport(){ const el=$('#x-report'); if(el) el.style.display='none'; }
+
+/* ---------- bulk upload → Supabase (chunked) ----------
+ * Rule (agreed): UPSERT by «رقم اليتيم» — an existing id is UPDATED with the file's
+ * row, a new id is ADDED. Visits (no id of their own) are INSERT-only, deduped
+ * against the DB's rows. Chunking is for delivery safety (payload size / statement
+ * timeout / progress feedback) — cost is size-based, not per-request.
+ * Idempotent: re-running the same file is safe, so a failed run can just be retried. */
+const CHUNK=400;   // rows per request — comfortable margin under payload/timeout limits
+function xErr(msg){ const b=$('#x-err'); if(b){ b.innerHTML=msg||''; b.style.display=msg?'block':'none'; } }
+async function uploadImport(rep, vraw){
+  if(!canEdit()){ xErr('صلاحيتك للعرض فقط — الرفع متاح للمحرّر والمدير.'); return; }
+  // orphans → DB shape; duplicate ids inside the file collapse to the LAST occurrence
+  // (one upsert can't touch the same row twice — and "the file's latest wins" matches the rule)
+  const byId=new Map();
+  rep.validRows.forEach(rw=>{ const r=pickCols(mapCells(rw.cells)); byId.set(String(r.id).trim(), r); });
+  const recs=[...byId.values()];
+  // visits: keep only rows keyed to an orphan and not already in the DB (exact-row match)
+  const vKey=v=>['oid','date','result','next','worker'].map(k=>v[k]==null?'':String(v[k]).trim()).join('|');
+  const haveV=new Set(VISITS.map(vKey)), seenV=new Set(), newVisits=[];
+  vraw.map(r=>mapRow(r,VISIT_COLS)).forEach(v=>{
+    if(!v.oid||!String(v.oid).trim()) return;
+    const k=vKey(v); if(haveV.has(k)||seenV.has(k)) return;
+    seenV.add(k); newVisits.push(v);
+  });
+  const total=recs.length+newVisits.length;
+  if(!total){ xErr('لا صفوف جديدة للرفع — كل ما في الملف موجود مسبقًا.'); return; }
+  const prog=$('#x-prog'), fill=$('#x-prog-fill'), txt=$('#x-prog-txt');
+  prog.style.display='block'; xErr(''); let done=0;
+  const step=w=>{ txt.textContent=w; fill.style.width=Math.round(done/total*100)+'%'; };
+  try{
+    for(let i=0;i<recs.length;i+=CHUNK){                       // cases: chunked UPSERT
+      const part=recs.slice(i,i+CHUNK);
+      step(`رفع الحالات… ${done} / ${recs.length}`);
+      const { error }=await sb.from('orphans').upsert(part); if(error) throw error;
+      done+=part.length; step(`رفع الحالات… ${done} / ${recs.length}`);
+    }
+  }catch(e){
+    xErr( permErr(e)
+      ? '⛔ رفضته قاعدة البيانات — صلاحيتك للعرض فقط.'
+      : `⚠ توقّف الرفع بعد ${done} من ${recs.length} حالة (${(e&&e.message)||e}).<br>أعد المحاولة بالملف نفسه — الرفع آمن للتكرار (تحديث بالرقم، لا تكرار).`);
+    txt.textContent='توقّف الرفع.'; return;
+  }
+  // visits ride separately: a visits failure must NOT void the already-landed cases.
+  // (e.g. the DB may lack write policies on `visits` — cases succeed, visits get reported)
+  let vDone=0, vFail=null;
+  try{
+    for(let i=0;i<newVisits.length;i+=CHUNK){                  // visits: chunked INSERT (new only)
+      const part=newVisits.slice(i,i+CHUNK);
+      step(`رفع الزيارات… ${vDone} / ${newVisits.length}`);
+      const { error }=await sb.from('visits').insert(part); if(error) throw error;
+      vDone+=part.length; done+=part.length;
+    }
+  }catch(e){ vFail=(e&&e.message)||String(e); }
+  step('✓ اكتمل الرفع — جارٍ تحديث اللوحة…'); fill.style.width='100%';
+  await refreshFromDb();                                       // pull the merged truth back from the DB
+  if(vFail){
+    xErr(`✓ رُفعت ${recs.length} حالة بنجاح — لكن تعذّر رفع الزيارات (${vDone} من ${newVisits.length}).<br>السبب غالبًا: جدول «visits» بلا سياسة كتابة (RLS) — أضِف سياسة insert للمحرّر/المدير ثم أعد ربط الملف نفسه (آمن للتكرار).`);
+    txt.textContent='اكتملت الحالات — الزيارات بحاجة سياسة كتابة.';
+    toast(`✓ رُفعت ${recs.length} حالة — تعذّرت الزيارات`);
+    return;
+  }
+  closeImport();
+  toast(`✓ رُفعت ${recs.length} حالة${newVisits.length?` و${newVisits.length} زيارة`:''} إلى قاعدة البيانات`);
+}
+
+/* ---------- bulk-import modal wiring (the «إضافة حالات من Excel» button) ---------- */
+function openImport(){
+  if(!canEdit()){ toast('صلاحيتك للعرض فقط'); return; }        // convenience — RLS is the real guard
+  SELECTED=new Set(PACKAGES.map(p=>p.id));                     // the SQL mould is ALWAYS the full model (no picker)
+  xErr(''); hideReport();
+  const p=$('#x-prog'); p.style.display='none'; $('#x-prog-fill').style.width='0%';
+  $('#ximp').classList.add('on');
+}
+function closeImport(){ $('#ximp').classList.remove('on'); }
+$('#t-import').addEventListener('click', openImport);
+$('#x-x').addEventListener('click', closeImport);
+$('#ximp').addEventListener('click', e=>{ if(e.target.id==='ximp') closeImport(); });
+document.addEventListener('keydown', e=>{ if(e.key==='Escape' && $('#ximp').classList.contains('on')) closeImport(); });
+$('#x-template').addEventListener('click', downloadTemplate);
+$('#x-connect').addEventListener('click', connectExcel);
+$('#x-file').addEventListener('change', async e=>{
+  const f=e.target.files[0]; if(!f) return; e.target.value='';   // reset so re-picking the same file re-fires
+  try{ await importBuffer(await f.arrayBuffer()); }catch(_){ xErr('تعذّرت قراءة الملف.'); }
+});
+
 async function loadSample(){
   const [c,v]=await Promise.all([fetch('sample/cases.json').then(r=>r.json()),fetch('sample/visits.json').then(r=>r.json())]);
   DATA=c; VISITS=v; HAS_VISITS=true; fileName='(بيانات نموذجية)'; fileHandle=null;
