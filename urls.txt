@@ -1,8 +1,3 @@
 SQL: 
 https://ibrahimaljabouri1562007com-sudo.github.io/Daleel-template-for-orphans-dashboard/Online%20dashboard%20versions/SQL%20version/dashboard-sql.html
 
-Googlesheet: 
-https://ibrahimaljabouri1562007com-sudo.github.io/Daleel-template-for-orphans-dashboard/Online%20dashboard%20versions/Google_sheet_dashboard/index.html
-
-Local:
-https://ibrahimaljabouri1562007com-sudo.github.io/Daleel-template-for-orphans-dashboard/Local%20doshboard/dashboard-daleel.html
